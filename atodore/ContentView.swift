@@ -4337,11 +4337,7 @@ private struct ShoppingView: View {
                 } else {
                     Section(filterOption.rawValue) {
                         ForEach(buyableProducts) { product in
-                            ProductRow(product: product)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    onSelect(product)
-                                }
+                            shoppingCard(for: product)
                         }
                     }
                 }
@@ -4637,6 +4633,10 @@ private struct StockView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+
+                    Text("行をタップすると詳細を確認できます。左スワイプで「買いました」「開けました」「なくなった」を記録できます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 if filteredProducts.isEmpty {
@@ -5819,6 +5819,15 @@ private struct AddProductView: View {
                     Form {
                         Section {
                             AddStepProgressView(step: step)
+                            if step > 1 {
+                                Button {
+                                    withAnimation(.snappy) {
+                                        step -= 1
+                                    }
+                                } label: {
+                                    Label("前の入力に戻る", systemImage: "chevron.left")
+                                }
+                            }
                         }
                         .listRowBackground(Color.clear)
 
@@ -7306,6 +7315,7 @@ private struct SettingsView: View {
     @State private var importResultMessage = ""
     @State private var pendingImportProducts: [StockProduct] = []
     @State private var isShowingImportPreview = false
+    @State private var showsAdvancedSettings = false
 
     private var notificationPreviews: [NotificationSchedulePreview] {
         NotificationSchedulePreviewService.previews(
@@ -7438,6 +7448,9 @@ private struct SettingsView: View {
 
                     Stepper("月間予算 \(JapaneseCurrencyFormatter.yen(monthlyPurchaseBudget))", value: $monthlyPurchaseBudget, in: 0...200_000, step: 1_000)
                     LabeledContent("今月の購入額", value: JapaneseCurrencyFormatter.yen(spendingSummary.currentMonthTotal))
+                    Text("購入額は各商品の「買いました」から合計金額を入力すると反映されます。金額未入力の購入履歴は集計に含まれません。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     LabeledContent("予算進捗", value: budgetProgressText)
                     LabeledContent("今月の購入件数", value: "\(spendingSummary.currentMonthCount)件")
                     LabeledContent("先月比", value: spendingSummary.trendText)
@@ -7465,85 +7478,94 @@ private struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Widget") {
-                    LabeledContent("表示サマリー", value: WidgetSnapshotService.snapshotText(for: products).replacingOccurrences(of: "\n", with: " / "))
-                    ShareLink(
-                        item: WidgetSnapshotService.snapshotText(for: products),
-                        subject: Text("あとどれ？ Widgetサマリー")
-                    ) {
-                        Label("サマリーを共有", systemImage: "square.and.arrow.up")
-                    }
+                Section("詳細設定") {
+                    Toggle("データ・診断・メンテナンスを表示", isOn: $showsAdvancedSettings)
+                    Text("普段使いでは必要な時だけ開けばよい項目です。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
-                Section("テンプレート") {
-                    Button("テンプレートから追加", action: onShowTemplates)
-                }
-
-                Section("データ") {
-                    LabeledContent("登録商品", value: "\(products.count)件")
-
-                    if products.isEmpty {
-                        Label("書き出せる商品がありません", systemImage: "tray")
-                            .foregroundStyle(.secondary)
-                    } else {
+                if showsAdvancedSettings {
+                    Section("Widget") {
+                        LabeledContent("表示サマリー", value: WidgetSnapshotService.snapshotText(for: products).replacingOccurrences(of: "\n", with: " / "))
                         ShareLink(
-                            item: AppDataExportService.exportText(for: products),
-                            subject: Text("あとどれ？ 商品データ"),
-                            message: Text("登録商品のバックアップデータです。")
+                            item: WidgetSnapshotService.snapshotText(for: products),
+                            subject: Text("あとどれ？ Widgetサマリー")
                         ) {
-                            Label("商品データを書き出す", systemImage: "square.and.arrow.up")
-                        }
-
-                        ShareLink(
-                            item: AppDataCSVExportService.exportText(for: products),
-                            subject: Text("あとどれ？ 商品一覧CSV"),
-                            message: Text("表計算アプリで確認しやすい商品一覧です。")
-                        ) {
-                            Label("CSVを書き出す", systemImage: "tablecells")
+                            Label("サマリーを共有", systemImage: "square.and.arrow.up")
                         }
                     }
 
-                    if !purchases.isEmpty {
-                        ShareLink(
-                            item: AppDataCSVExportService.purchaseHistoryText(for: purchases),
-                            subject: Text("あとどれ？ 購入履歴CSV"),
-                            message: Text("購入履歴の確認用CSVです。")
-                        ) {
-                            Label("購入履歴CSVを書き出す", systemImage: "cart")
+                    Section("テンプレート") {
+                        Button("テンプレートから追加", action: onShowTemplates)
+                    }
+
+                    Section("データ") {
+                        LabeledContent("登録商品", value: "\(products.count)件")
+
+                        if products.isEmpty {
+                            Label("書き出せる商品がありません", systemImage: "tray")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ShareLink(
+                                item: AppDataExportService.exportText(for: products),
+                                subject: Text("あとどれ？ 商品データ"),
+                                message: Text("登録商品のバックアップデータです。")
+                            ) {
+                                Label("商品データを書き出す", systemImage: "square.and.arrow.up")
+                            }
+
+                            ShareLink(
+                                item: AppDataCSVExportService.exportText(for: products),
+                                subject: Text("あとどれ？ 商品一覧CSV"),
+                                message: Text("表計算アプリで確認しやすい商品一覧です。")
+                            ) {
+                                Label("CSVを書き出す", systemImage: "tablecells")
+                            }
                         }
-                    }
 
-                    Button {
-                        isShowingDataImporter = true
-                    } label: {
-                        Label("商品データを読み込む", systemImage: "square.and.arrow.down")
-                    }
-                }
+                        if !purchases.isEmpty {
+                            ShareLink(
+                                item: AppDataCSVExportService.purchaseHistoryText(for: purchases),
+                                subject: Text("あとどれ？ 購入履歴CSV"),
+                                message: Text("購入履歴の確認用CSVです。")
+                            ) {
+                                Label("購入履歴CSVを書き出す", systemImage: "cart")
+                            }
+                        }
 
-                Section("診断") {
-                    Toggle("起動時に品質チェック", isOn: $qualityCheckOnLaunch)
-
-                    ForEach(AppDiagnosticsService.diagnostics(for: products, purchases: purchases, monthlyBudget: monthlyPurchaseBudget)) { diagnostic in
-                        LabeledContent {
-                            Text(diagnostic.value)
-                                .foregroundStyle(diagnostic.isAttentionNeeded ? .orange : .secondary)
+                        Button {
+                            isShowingDataImporter = true
                         } label: {
-                            Label(diagnostic.title, systemImage: diagnostic.isAttentionNeeded ? "exclamationmark.triangle.fill" : "checkmark.circle")
+                            Label("商品データを読み込む", systemImage: "square.and.arrow.down")
                         }
                     }
-                }
 
-                Section("メンテナンス") {
-                    Button {
-                        onRepairData()
-                    } label: {
-                        Label("データを自動修復", systemImage: "wrench.and.screwdriver")
+                    Section("診断") {
+                        Toggle("起動時に品質チェック", isOn: $qualityCheckOnLaunch)
+
+                        ForEach(AppDiagnosticsService.diagnostics(for: products, purchases: purchases, monthlyBudget: monthlyPurchaseBudget)) { diagnostic in
+                            LabeledContent {
+                                Text(diagnostic.value)
+                                    .foregroundStyle(diagnostic.isAttentionNeeded ? .orange : .secondary)
+                            } label: {
+                                Label(diagnostic.title, systemImage: diagnostic.isAttentionNeeded ? "exclamationmark.triangle.fill" : "checkmark.circle")
+                            }
+                        }
                     }
 
-                    Button {
-                        onApplyCategorySuggestions()
-                    } label: {
-                        Label("カテゴリ候補を反映", systemImage: "wand.and.sparkles")
+                    Section("メンテナンス") {
+                        Button {
+                            onRepairData()
+                        } label: {
+                            Label("データを自動修復", systemImage: "wrench.and.screwdriver")
+                        }
+
+                        Button {
+                            onApplyCategorySuggestions()
+                        } label: {
+                            Label("カテゴリ候補を反映", systemImage: "wand.and.sparkles")
+                        }
                     }
                 }
 
