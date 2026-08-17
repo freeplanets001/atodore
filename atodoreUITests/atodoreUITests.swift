@@ -10,34 +10,58 @@ import XCTest
 final class atodoreUITests: XCTestCase {
 
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
-        let app = XCUIApplication()
-        app.launch()
+    func testMainTabsAreAvailableAfterOnboarding() throws {
+        let app = launchApp(hasCompletedOnboarding: true)
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        XCTAssertTrue(app.tabBars.buttons["ホーム"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.tabBars.buttons["買い物"].exists)
+        XCTAssertTrue(app.tabBars.buttons["ストック"].exists)
+        XCTAssertTrue(app.tabBars.buttons["設定"].exists)
+    }
+
+    @MainActor
+    func testSettingsCanOpenTemplateLibrary() throws {
+        let app = launchApp(hasCompletedOnboarding: true)
+
+        app.tabBars.buttons["設定"].tap()
+
+        XCTAssertTrue(app.buttons["テンプレートから追加"].waitForExistence(timeout: 4))
+        app.buttons["テンプレートから追加"].tap()
+
+        XCTAssertTrue(app.navigationBars["テンプレート"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["テンプレートを選ぶ"].exists)
+        XCTAssertTrue(app.staticTexts["生活用品"].exists)
+    }
+
+    @MainActor
+    func testOnboardingShowsInitialSetupAndTemplates() throws {
+        let app = launchApp(hasCompletedOnboarding: false)
+
+        XCTAssertTrue(app.staticTexts["必要な時だけ、知らせます"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["初期設定"].exists)
+        XCTAssertTrue(app.staticTexts["テンプレートを選ぶ"].exists)
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "選んだテンプレートを登録")).firstMatch.exists)
     }
 
     @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+            _ = launchApp(hasCompletedOnboarding: true)
         }
+    }
+
+    @MainActor
+    private func launchApp(hasCompletedOnboarding: Bool) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-hasCompletedOnboarding",
+            hasCompletedOnboarding ? "YES" : "NO"
+        ]
+        app.launch()
+        return app
     }
 }
