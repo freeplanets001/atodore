@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#12a892"/>
+  <path d="M0 0h1024v1024H0z" fill="#12a892"/>
+  <circle cx="190" cy="160" r="165" fill="#52d7c1" opacity="0.55"/>
+  <circle cx="842" cy="846" r="245" fill="#08706e" opacity="0.75"/>
+  <circle cx="512" cy="512" r="332" fill="#0b806f"/>
+  <circle cx="512" cy="512" r="286" fill="#f6fff8"/>
+  <path d="M512 180a332 332 0 0 1 290 493" fill="none" stroke="#ffbf3d" stroke-width="76" stroke-linecap="round"/>
+  <circle cx="512" cy="512" r="244" fill="#0f9b88"/>
+
+  <path d="M286 394 512 272l226 122-226 124z" fill="#fff7df"/>
+  <path d="M286 394v250l226 132V518z" fill="#b7f0df"/>
+  <path d="M738 394v250L512 776V518z" fill="#e7fff4"/>
+  <path d="M286 394 512 518l226-124" fill="none" stroke="#08665d" stroke-width="18" stroke-linejoin="round" opacity="0.28"/>
+  <path d="M512 518v258" fill="none" stroke="#08665d" stroke-width="16" opacity="0.2"/>
+
+  <circle cx="698" cy="680" r="118" fill="#18383d"/>
+  <polyline points="640,676 680,718 760,626" fill="none" stroke="#fff3cf" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
