@@ -4,6 +4,8 @@
 <dict>
 	<key>BarcodeLookupProxyURL</key>
 	<string>https://atodore-barcode-proxy.freeplanets001.workers.dev/</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>レシートを撮影して商品候補を読み取るためにカメラを使用します。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
