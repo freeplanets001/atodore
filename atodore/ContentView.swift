@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var isShowingAddProduct = false
     @State private var isShowingOnboarding = false
     @State private var selectedProduct: StockProduct?
+    @State private var purchasingProduct: StockProduct?
     @State private var isShowingPaywall = false
     @State private var isShowingTemplateLibrary = false
     @State private var toastMessage: String?
@@ -85,7 +86,7 @@ struct ContentView: View {
                 usageHistories: usageHistoryEntries,
                 onAdd: showAddProductFlow,
                 onSelect: { selectedProduct = $0 },
-                onBought: { recordPurchase(product: $0, quantity: 1, price: nil, store: "", purchasedAt: Date()) },
+                onBought: { purchasingProduct = $0 },
                 onOpened: { openProduct(product: $0, openedAt: Date()) },
                 onFinished: { finishUsing(product: $0, finishedAt: Date()) },
                 onDeleteUsage: deleteUsageRecord
@@ -141,6 +142,11 @@ struct ContentView: View {
                 saveProduct(product, toastMessage: "登録しました")
             }
         }
+        .sheet(item: $purchasingProduct) { product in
+            PurchaseSheet(product: product, defaults: purchaseDefaults(for: product)) { quantity, price, store, purchasedAt in
+                recordPurchase(product: product, quantity: quantity, price: price, store: store, purchasedAt: purchasedAt)
+            }
+        }
         .sheet(item: $selectedProduct) { product in
             ProductDetailView(
                 product: product,
@@ -149,7 +155,6 @@ struct ContentView: View {
                 onStillHave: extendPrediction,
                 onFinished: finishUsing,
                 onOpened: openProduct,
-                onBought: { recordPurchase(product: $0, quantity: 1, price: nil, store: "", purchasedAt: Date()) },
                 onOpenPurchasePage: openPurchasePage,
                 onSavePurchaseURL: savePurchaseURL,
                 onRecordPurchase: recordPurchase,
@@ -4748,7 +4753,6 @@ private struct ProductDetailView: View {
     let onStillHave: (StockProduct) -> Void
     let onFinished: (StockProduct, Date) -> Void
     let onOpened: (StockProduct, Date) -> Void
-    let onBought: (StockProduct) -> Void
     let onOpenPurchasePage: (StockProduct) async -> Void
     let onSavePurchaseURL: (StockProduct, String) -> Void
     let onRecordPurchase: (StockProduct, Int, Int?, String, Date) -> Void
@@ -4848,7 +4852,7 @@ private struct ProductDetailView: View {
                             latestPurchaseDate: purchases.first?.purchasedAt,
                             purchaseStats: PurchaseStats(purchases: purchases),
                             onOpened: { isShowingOpenedDialog = true },
-                            onBought: { onBought(product) },
+                            onBought: { isShowingPurchaseSheet = true },
                             onDeleteRequest: { isShowingDeleteDialog = true }
                         )
                     }
