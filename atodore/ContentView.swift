@@ -45,7 +45,6 @@ struct ContentView: View {
     @AppStorage("preferredShoppingWeekday") private var preferredShoppingWeekday = 0
     @AppStorage("defaultPurchaseProvider") private var defaultPurchaseProviderRawValue = PurchaseProvider.amazon.rawValue
     @AppStorage("usesAIForPurchaseSearch") private var usesAIForPurchaseSearch = true
-    @AppStorage("yahooShoppingClientID") private var yahooShoppingClientID = ""
     @AppStorage("householdAdults") private var householdAdults = 1
     @AppStorage("householdChildren") private var householdChildren = 0
     @AppStorage("householdPets") private var householdPets = 0
@@ -106,7 +105,6 @@ struct ContentView: View {
                 preferredShoppingWeekday: $preferredShoppingWeekday,
                 defaultPurchaseProviderRawValue: $defaultPurchaseProviderRawValue,
                 usesAIForPurchaseSearch: $usesAIForPurchaseSearch,
-                yahooShoppingClientID: $yahooShoppingClientID,
                 householdAdults: $householdAdults,
                 householdChildren: $householdChildren,
                 householdPets: $householdPets,
@@ -132,7 +130,7 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingAddProduct) {
             AddProductView(
                 householdProfile: householdProfile,
-                yahooShoppingClientID: yahooShoppingClientID,
+                barcodeLookupProxyURLString: AppAPIConfiguration.barcodeLookupProxyURLString,
                 onRequestNotifications: requestNotificationAuthorization,
                 availableProductSlots: isProUser ? nil : max(AppPlan.freeProductLimit - products.count, 0),
                 onLimitReached: {
@@ -2839,6 +2837,12 @@ private enum AppTheme {
 
 private enum AppPlan {
     static let freeProductLimit = 10
+}
+
+private enum AppAPIConfiguration {
+    static var barcodeLookupProxyURLString: String {
+        Bundle.main.object(forInfoDictionaryKey: "BarcodeLookupProxyURL") as? String ?? ""
+    }
 }
 
 private struct StarterTemplate: Identifiable, Hashable {
@@ -5754,7 +5758,7 @@ private struct EditProductView: View {
 
 private struct AddProductView: View {
     let householdProfile: HouseholdProfile
-    let yahooShoppingClientID: String
+    let barcodeLookupProxyURLString: String
     let onRequestNotifications: () async -> Void
     let availableProductSlots: Int?
     let onLimitReached: () -> Void
@@ -6072,7 +6076,7 @@ private struct AddProductView: View {
         Task {
             let result = await BarcodeProductLookupService.lookup(
                 barcode: trimmedCode,
-                yahooShoppingClientID: yahooShoppingClientID
+                proxyURLString: barcodeLookupProxyURLString
             )
             await MainActor.run {
                 isLookingUpBarcode = false
@@ -6486,28 +6490,24 @@ struct BarcodeProductLookupResult: Equatable {
 }
 
 nonisolated enum BarcodeProductLookupService {
-    static func lookup(barcode: String, yahooShoppingClientID: String = "") async -> BarcodeProductLookupResult? {
+    static func lookup(barcode: String, proxyURLString: String = "") async -> BarcodeProductLookupResult? {
         let digits = barcode.filter(\.isNumber)
         guard digits.count >= 8 else { return nil }
 
-        if let yahooResult = await yahooShoppingResult(barcode: digits, clientID: yahooShoppingClientID) {
-            return yahooResult
+        if let proxyResult = await proxyResult(barcode: digits, proxyURLString: proxyURLString) {
+            return proxyResult
         }
 
         return await openFoodFactsResult(barcode: digits)
     }
 
-    private static func yahooShoppingResult(barcode: String, clientID: String) async -> BarcodeProductLookupResult? {
-        let trimmedClientID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedClientID.isEmpty else { return nil }
+    private static func proxyResult(barcode: String, proxyURLString: String) async -> BarcodeProductLookupResult? {
+        let trimmedProxyURLString = proxyURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedProxyURLString.isEmpty,
+              var components = URLComponents(string: trimmedProxyURLString) else { return nil }
 
-        guard var components = URLComponents(string: "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch") else {
-            return nil
-        }
         components.queryItems = [
-            URLQueryItem(name: "appid", value: trimmedClientID),
-            URLQueryItem(name: "jan_code", value: barcode),
-            URLQueryItem(name: "results", value: "1")
+            URLQueryItem(name: "barcode", value: barcode)
         ]
         guard let url = components.url else { return nil }
 
@@ -6519,15 +6519,14 @@ nonisolated enum BarcodeProductLookupService {
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                 return nil
             }
-            let decoded = try JSONDecoder().decode(YahooShoppingItemSearchResponse.self, from: data)
-            guard let hit = decoded.hits.first else { return nil }
-            let name = hit.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { return nil }
+            let decoded = try JSONDecoder().decode(BarcodeLookupProxyResponse.self, from: data)
+            let name = decoded.productName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard decoded.found, !name.isEmpty else { return nil }
 
             return BarcodeProductLookupResult(
                 productName: name,
-                brand: hit.brand?.name,
-                sourceName: "Yahoo!ショッピング"
+                brand: decoded.brand,
+                sourceName: decoded.sourceName ?? "バーコード検索"
             )
         } catch {
             return nil
@@ -6580,17 +6579,11 @@ nonisolated enum BarcodeProductLookupService {
     }
 }
 
-nonisolated private struct YahooShoppingItemSearchResponse: Decodable {
-    let hits: [YahooShoppingItem]
-}
-
-nonisolated private struct YahooShoppingItem: Decodable {
-    let name: String
-    let brand: YahooShoppingBrand?
-}
-
-nonisolated private struct YahooShoppingBrand: Decodable {
-    let name: String?
+nonisolated private struct BarcodeLookupProxyResponse: Decodable {
+    let found: Bool
+    let productName: String
+    let brand: String?
+    let sourceName: String?
 }
 
 nonisolated private struct OpenFoodFactsProductResponse: Decodable {
@@ -7163,7 +7156,7 @@ private struct PurchaseSheet: View {
                 }
                 Section {
                     Stepper("数量 \(quantity)\(purchaseUnit)", value: $quantity, in: 1...99)
-                    TextField("価格 任意", text: $price)
+                    TextField("合計金額 任意", text: $price)
                         .keyboardType(.numberPad)
                     if purchase == nil, let priceComparison {
                         Label(priceComparison.message, systemImage: priceComparisonSymbol(for: priceComparison.direction))
@@ -7283,7 +7276,6 @@ private struct SettingsView: View {
     @Binding var preferredShoppingWeekday: Int
     @Binding var defaultPurchaseProviderRawValue: String
     @Binding var usesAIForPurchaseSearch: Bool
-    @Binding var yahooShoppingClientID: String
     @Binding var householdAdults: Int
     @Binding var householdChildren: Int
     @Binding var householdPets: Int
@@ -7436,18 +7428,9 @@ private struct SettingsView: View {
 
                     Toggle("AI検索ワード提案", isOn: $usesAIForPurchaseSearch)
 
-                    TextField("Yahoo! Client ID", text: $yahooShoppingClientID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("設定すると、JANコードからYahoo!ショッピングの商品情報を検索します。未設定でも食品はOpen Food Factsで検索します。")
+                    Text("バーコード検索は開発者登録済みのYahoo!ショッピングAPIとOpen Food Factsを利用します。利用者側でAPI登録は不要です。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-
-                    if let developerURL = URL(string: "https://developer.yahoo.co.jp/") {
-                        Link(destination: developerURL) {
-                            Label("Yahoo!デベロッパーネットワーク", systemImage: "link")
-                        }
-                    }
 
                     Stepper("月間予算 \(JapaneseCurrencyFormatter.yen(monthlyPurchaseBudget))", value: $monthlyPurchaseBudget, in: 0...200_000, step: 1_000)
                     LabeledContent("今月の購入額", value: JapaneseCurrencyFormatter.yen(spendingSummary.currentMonthTotal))
