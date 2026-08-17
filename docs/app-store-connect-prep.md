@@ -42,11 +42,12 @@
 
 ## App Privacy 回答案
 
-方針: アプリ内の登録商品、写真、メモ、購入履歴、使用履歴、通知設定は端末内に保存します。アカウント登録やログインはありません。
+方針: アプリ内の登録商品、写真、メモ、購入履歴、使用履歴、通知設定はアプリ内に保存します。iCloud同期が有効な場合、ユーザーのiCloudアカウントを通じて同じApple IDの端末間で同期されます。アプリ独自のアカウント登録やログインはありません。
 
 外部送信:
 
 - バーコード検索時に、検索対象のバーコード番号をOpen Food Factsまたは開発者管理の中継APIへ送信する場合があります。
+- Pro機能の購入状態は、App Storeのアプリ内課金機能を通じて確認します。
 - メールで問い合わせる場合、ユーザーがメール本文として入力した内容のみ送信されます。
 
 App Store Connectの回答は、実際に有効化する機能とプライバシーポリシーに合わせて最終確認してください。
@@ -76,5 +77,8 @@ App Store Connectの回答は、実際に有効化する機能とプライバシ
 - 実機でカメラ、写真、通知許可を確認
 - バーコード検索が未検出でも手入力に戻れることを確認
 - Cloudflare APIトークンとYahooシークレットIDを再発行または無効化
+- App Store Connectで月額Pro商品 `com.freeplanets001.atodore.pro.monthly` を作成
+- XcodeのSigning & CapabilitiesでiCloud / CloudKitを有効化し、`iCloud.com.freeplanets001.atodore` を選択
+- CloudKit Consoleで開発スキーマを確認し、本番申請前にProductionへデプロイ
 - App Store ConnectのApp Privacy回答とプライバシーポリシー文面の整合性を確認
 - TestFlightで最低1回インストール確認

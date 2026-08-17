@@ -8,6 +8,10 @@
 import SwiftUI
 import SwiftData
 
+enum AppCloudKit {
+    static let containerIdentifier = "iCloud.com.freeplanets001.atodore"
+}
+
 @main
 struct atodoreApp: App {
     var sharedModelContainer: ModelContainer = {
@@ -16,7 +20,11 @@ struct atodoreApp: App {
             PurchaseRecord.self,
             UsageRecord.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private(AppCloudKit.containerIdentifier)
+        )
 
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])

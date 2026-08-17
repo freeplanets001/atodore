@@ -7,6 +7,8 @@
 
 import SwiftUI
 import SwiftData
+import StoreKit
+import CloudKit
 import UniformTypeIdentifiers
 import UserNotifications
 #if canImport(UIKit)
@@ -38,6 +40,10 @@ struct ContentView: View {
     @State private var isShowingPaywall = false
     @State private var isShowingTemplateLibrary = false
     @State private var toastMessage: String?
+    @State private var proProduct: Product?
+    @State private var isLoadingStoreProducts = false
+    @State private var isPurchasingPro = false
+    @State private var storeStatusMessage = "App Storeから商品情報を読み込みます。"
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("isProUser") private var isProUser = false
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
@@ -116,7 +122,9 @@ struct ContentView: View {
                 onSendTestNotification: sendTestNotification,
                 onShowPaywall: { isShowingPaywall = true },
                 onRestorePurchase: {
-                    showToast("購入復元は準備中です")
+                    Task {
+                        await restoreProPurchase()
+                    }
                 },
                 onShowTemplates: { isShowingTemplateLibrary = true },
                 onShowOnboarding: { isShowingOnboarding = true },
@@ -189,11 +197,19 @@ struct ContentView: View {
                 isProUser: isProUser,
                 registeredCount: products.count,
                 freeLimit: AppPlan.freeProductLimit,
+                proProductDisplayPrice: proProduct?.displayPrice,
+                storeStatusMessage: storeStatusMessage,
+                isLoadingStoreProducts: isLoadingStoreProducts,
+                isPurchasingPro: isPurchasingPro,
                 onStartPro: {
-                    showToast("Pro機能は準備中です")
+                    Task {
+                        await purchasePro()
+                    }
                 },
                 onRestore: {
-                    showToast("購入復元は準備中です")
+                    Task {
+                        await restoreProPurchase()
+                    }
                 },
                 onDismiss: {
                     isShowingPaywall = false
@@ -223,6 +239,15 @@ struct ContentView: View {
                 showQualityCheckToastIfNeeded()
             }
         }
+        .task {
+            await refreshProEntitlement()
+            await loadStoreProducts()
+        }
+        .task {
+            for await verificationResult in StoreKit.Transaction.updates {
+                await handleProTransaction(verificationResult, shouldFinish: true)
+            }
+        }
     }
 
     private func showToast(_ message: String) {
@@ -238,6 +263,112 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    @MainActor private func loadStoreProducts() async {
+        guard !isLoadingStoreProducts else { return }
+        isLoadingStoreProducts = true
+        defer { isLoadingStoreProducts = false }
+
+        do {
+            let products = try await Product.products(for: AppStoreProductID.all)
+            proProduct = products.first { $0.id == AppStoreProductID.proMonthly }
+            storeStatusMessage = proProduct == nil
+                ? "App Store ConnectでPro商品を作成すると購入できます。"
+                : "Proにすると登録数の上限を解除できます。"
+        } catch {
+            storeStatusMessage = "商品情報を取得できませんでした。通信状態を確認してください。"
+        }
+    }
+
+    @MainActor private func purchasePro() async {
+        if proProduct == nil {
+            await loadStoreProducts()
+        }
+
+        guard let proProduct else {
+            showToast("Pro商品がまだApp Store Connectに設定されていません")
+            return
+        }
+
+        isPurchasingPro = true
+        defer { isPurchasingPro = false }
+
+        do {
+            let result = try await proProduct.purchase()
+            switch result {
+            case .success(let verificationResult):
+                let isActive = await handleProTransaction(verificationResult, shouldFinish: true)
+                showToast(isActive ? "Proが有効になりました" : "購入を確認できませんでした")
+            case .pending:
+                showToast("購入は承認待ちです")
+            case .userCancelled:
+                showToast("購入をキャンセルしました")
+            @unknown default:
+                showToast("購入結果を確認できませんでした")
+            }
+        } catch {
+            showToast("購入に失敗しました")
+        }
+    }
+
+    @MainActor private func restoreProPurchase() async {
+        do {
+            try await AppStore.sync()
+            await refreshProEntitlement()
+            showToast(isProUser ? "購入を復元しました" : "復元できる購入はありません")
+        } catch {
+            showToast("購入復元に失敗しました")
+        }
+    }
+
+    @MainActor private func refreshProEntitlement() async {
+        var hasActivePro = false
+        for await verificationResult in StoreKit.Transaction.currentEntitlements {
+            if await handleProTransaction(verificationResult, shouldFinish: false) {
+                hasActivePro = true
+            }
+        }
+        isProUser = hasActivePro
+    }
+
+    @MainActor @discardableResult private func handleProTransaction(_ verificationResult: VerificationResult<StoreKit.Transaction>, shouldFinish: Bool) async -> Bool {
+        guard case .verified(let transaction) = verificationResult else {
+            storeStatusMessage = "購入情報を検証できませんでした。"
+            return false
+        }
+
+        guard transaction.productID == AppStoreProductID.proMonthly else {
+            if shouldFinish {
+                await transaction.finish()
+            }
+            return false
+        }
+
+        if transaction.revocationDate != nil {
+            isProUser = false
+            storeStatusMessage = "Pro購入は取り消されています。"
+            if shouldFinish {
+                await transaction.finish()
+            }
+            return false
+        }
+
+        if let expirationDate = transaction.expirationDate, expirationDate < Date() {
+            isProUser = false
+            storeStatusMessage = "Proの有効期限が切れています。"
+            if shouldFinish {
+                await transaction.finish()
+            }
+            return false
+        }
+
+        isProUser = true
+        storeStatusMessage = "Proが有効です。"
+        if shouldFinish {
+            await transaction.finish()
+        }
+        return true
     }
 
     private func showAddProductFlow() {
@@ -2844,6 +2975,11 @@ private enum AppPlan {
     static let freeProductLimit = 10
 }
 
+private enum AppStoreProductID {
+    static let proMonthly = "com.freeplanets001.atodore.pro.monthly"
+    static let all = [proMonthly]
+}
+
 private enum AppAPIConfiguration {
     static var barcodeLookupProxyURLString: String {
         Bundle.main.object(forInfoDictionaryKey: "BarcodeLookupProxyURL") as? String ?? ""
@@ -3869,6 +4005,10 @@ private struct PaywallView: View {
     let isProUser: Bool
     let registeredCount: Int
     let freeLimit: Int
+    let proProductDisplayPrice: String?
+    let storeStatusMessage: String
+    let isLoadingStoreProducts: Bool
+    let isPurchasingPro: Bool
     let onStartPro: () -> Void
     let onRestore: () -> Void
     let onDismiss: () -> Void
@@ -3913,12 +4053,21 @@ private struct PaywallView: View {
                     }
                     .premiumSurface(background: AppTheme.softMint)
 
+                    VStack(alignment: .leading, spacing: 8) {
+                        LabeledContent("Pro月額", value: proProductDisplayPrice ?? "未設定")
+                        Text(storeStatusMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .premiumSurface()
+
                     VStack(spacing: 12) {
-                        Button(isProUser ? "Proは有効です" : "Pro機能は準備中", action: onStartPro)
+                        Button(proButtonTitle, action: onStartPro)
                             .buttonStyle(PremiumActionButtonStyle())
-                            .disabled(isProUser)
-                        Button("購入復元は準備中", action: onRestore)
+                            .disabled(isProUser || proProductDisplayPrice == nil || isLoadingStoreProducts || isPurchasingPro)
+                        Button("購入を復元", action: onRestore)
                             .buttonStyle(PremiumSecondaryButtonStyle())
+                            .disabled(isPurchasingPro)
                         Button("今はやめておく", action: onDismiss)
                             .font(.body.weight(.semibold))
                             .frame(maxWidth: .infinity)
@@ -3936,6 +4085,22 @@ private struct PaywallView: View {
                 }
             }
         }
+    }
+
+    private var proButtonTitle: String {
+        if isProUser {
+            return "Proは有効です"
+        }
+        if isPurchasingPro {
+            return "購入処理中"
+        }
+        if isLoadingStoreProducts {
+            return "商品情報を読み込み中"
+        }
+        if let proProductDisplayPrice {
+            return "Proを始める \(proProductDisplayPrice)"
+        }
+        return "Pro商品が未設定です"
     }
 }
 
@@ -7308,6 +7473,7 @@ private struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @State private var notificationStatusText = "確認中"
     @State private var pendingReminderCountText = "確認中"
+    @State private var iCloudStatusText = "確認中"
     @State private var selectedDocument: AppDocument?
     @State private var isShowingContact = false
     @State private var isShowingDataImporter = false
@@ -7478,6 +7644,20 @@ private struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("同期") {
+                    LabeledContent("iCloud同期", value: iCloudStatusText)
+                    Text("同じApple IDでiCloudにサインインしている端末間で、登録商品や履歴を同期します。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        Task {
+                            await refreshICloudStatus()
+                        }
+                    } label: {
+                        Label("同期状態を確認", systemImage: "icloud")
+                    }
+                }
+
                 Section("詳細設定") {
                     Toggle("データ・診断・メンテナンスを表示", isOn: $showsAdvancedSettings)
                     Text("普段使いでは必要な時だけ開けばよい項目です。")
@@ -7575,7 +7755,7 @@ private struct SettingsView: View {
                         LabeledContent("登録数", value: "\(min(registeredCount, freeLimit)) / \(freeLimit)")
                     }
                     Button("Proを見る", action: onShowPaywall)
-                    Button("購入復元は準備中", action: onRestorePurchase)
+                    Button("購入を復元", action: onRestorePurchase)
                 }
 
                 Section("アプリ") {
@@ -7601,6 +7781,7 @@ private struct SettingsView: View {
             .task {
                 await refreshNotificationStatus()
                 await refreshPendingReminderCount()
+                await refreshICloudStatus()
             }
             .sheet(item: $selectedDocument) { document in
                 AppDocumentView(document: document)
@@ -7666,6 +7847,33 @@ private struct SettingsView: View {
         }
     }
 
+    private func refreshICloudStatus() async {
+        let text: String
+        do {
+            let status = try await CKContainer(identifier: AppCloudKit.containerIdentifier).accountStatus()
+            switch status {
+            case .available:
+                text = "利用可能"
+            case .noAccount:
+                text = "iCloud未ログイン"
+            case .restricted:
+                text = "制限中"
+            case .couldNotDetermine:
+                text = "確認できません"
+            case .temporarilyUnavailable:
+                text = "一時的に利用不可"
+            @unknown default:
+                text = "不明"
+            }
+        } catch {
+            text = "確認できません"
+        }
+
+        await MainActor.run {
+            iCloudStatusText = text
+        }
+    }
+
     private func importData(from result: Result<URL, Error>) {
         switch result {
         case .success(let url):
@@ -7722,16 +7930,17 @@ private enum AppDocument: String, Identifiable {
         switch self {
         case .privacy:
             [
-                ("取得する情報", "商品名、カテゴリ、使用状況、購入履歴、通知設定など、アプリの機能に必要な情報を端末内に保存します。"),
+                ("取得する情報", "商品名、カテゴリ、使用状況、購入履歴、通知設定、写真、メモなど、アプリの機能に必要な情報を保存します。iCloud同期が有効な場合、同じApple IDの端末間で同期されます。"),
                 ("AI機能", "Apple Intelligence が利用できる場合、商品登録や検索ワード提案に入力内容を使います。利用できない場合は端末内のルールで提案します。"),
                 ("通知", "通知を許可した場合、買い時の目安に合わせてローカル通知を送ります。通知は設定からいつでも変更できます。"),
+                ("購入情報", "Pro機能の購入状態はApp Storeのアプリ内課金機能を通じて確認します。開発者がクレジットカード情報を取得することはありません。"),
                 ("第三者提供", "本バージョンでは、保存した商品データを外部サービスへ販売または提供しません。購入ページを開く場合は、選択したサイトの規約が適用されます。")
             ]
         case .terms:
             [
                 ("利用について", "本アプリは日用品や消耗品の補充タイミングを管理するための補助ツールです。予測日は目安であり、正確な在庫を保証するものではありません。"),
                 ("購入リンク", "購入ページや検索結果は外部サイトを開きます。価格、在庫、配送、購入条件は各サイトで確認してください。"),
-                ("Pro機能", "Pro機能や購入復元は、正式な課金実装後にApp Storeの仕組みに従って提供されます。"),
+                ("Pro機能", "Pro機能はApp Storeのアプリ内課金を通じて提供されます。購入状態の確認や復元はApp Storeの仕組みに従って行います。"),
                 ("免責", "本アプリの利用により生じた購入漏れ、重複購入、外部サイトでの取引について、開発者は責任を負いません。")
             ]
         }
